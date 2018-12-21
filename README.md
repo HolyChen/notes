@@ -1,5 +1,5 @@
 # notes
-My own notes about anything, may be helpful?
+My own notes about anything, maybe helpful?
 
 Outline:
 
