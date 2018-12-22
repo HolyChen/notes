@@ -27,7 +27,7 @@ CUDA编程模型假设主机和设备独立维护各自的内存空间，称为*
 // kernel definition
 __global__ void vec_add(float* A, float* B, float* C)
 {
-    uint32_t i = threadIdx.x;
+    int i = threadIdx.x;
     C[i] = A[i] + B[i];
 }
 
@@ -67,7 +67,7 @@ kernel前的`__global__`是一个**函数执行空间限定符**(*[Function Exec
 // kernel definition
 __global__ void vec_add(float* A, float* B, float* C)
 {
-    uint32_t i = threadIdx.x;
+    int i = threadIdx.x;
     C[i] = A[i] + B[i];
 }
 
