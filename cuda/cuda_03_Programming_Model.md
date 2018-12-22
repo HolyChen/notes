@@ -12,7 +12,7 @@ CUDA编程模型假设CUDA程序运行在一个物理分离的**设备**(*device
 >
 > ![heterogeneous-programming.png](./resources/heterogeneous-programming.png)
 
-主机和设备独立维护各自的内存空间，称为**主机内存**(*host memory*)和**设备内存**(*device memory*)。程序通过调用CUDA运行时函数对设备内存进行管理，包括内存分配、析构以及数据传输等。
+CUDA编程模型假设主机和设备独立维护各自的内存空间，称为**主机内存**(*host memory*)和**设备内存**(*device memory*)。程序通过调用CUDA运行时函数对设备内存进行管理，包括内存分配、释放以及数据传输等。
 
 *Unified Memory*提供了桥接主机、设备内存空间的**托管内存**(*managed memory*)，这使得用户可以使用一个具有共同地址空间的、单一、一致的内存镜像访问所有CPU和GPU上的内存空间。
 
@@ -275,7 +275,7 @@ int main()
 }
 ```
 
-在kernel中，可以看到，
+在kernel中，可以看到，矩阵的行由`y`坐标计算得到，列则有`x`坐标计算得到。这里为了简化程序，使用一维数组替代了二维数组。在[Chapter 4](./cuda_04_Memory.md)中，将会看到直接创建二维、三维数组的例子。
 
 ## 内存层次
 
