@@ -4,7 +4,9 @@
 
 ## 目录
 
-[03 编程模型](./cuda_03_Programming_Model.md)
+[03 编程模型](./cuda_03.md)
 
-[04 内存](./cuda_04_Memory.md)
+[04 内存](./cuda_04.md)
+
+[附录A 调试](./cuda_appendix_A.md)
 

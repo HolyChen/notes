@@ -213,25 +213,25 @@ struct Matrix
     size_t stride;
 };
 
-__device__ float get_element(const Matrix A, int row, int col)
+__device__ float get_element(const Matrix A, size_t row, size_t col)
 {
     return A.elements[row * A.stride + col];
 }
 
-__device__ void set_element(Matrix A, int row, int col, float value)
+__device__ void set_element(Matrix A, size_t row, size_t col, float value)
 {
     A.elements[row * A.stride + col] = value;
 }
 
 __global__ void mat_mul_kernel(const Matrix A, const Matrix B, Matrix C)
 {
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t row = blockIdx.y * blockDim.y + threadIdx.y;
+    size_t col = blockIdx.x * blockDim.x + threadIdx.x;
 
     float result = 0.0f;
-    int N = B.rows;
+    size_t N = B.rows;
 
-    for (int i = 0; i < N; i++)
+    for (size_t i = 0; i < N; i++)
     {
         result += get_element(A, row, i) * get_element(B, i, col);
     }
@@ -241,13 +241,12 @@ __global__ void mat_mul_kernel(const Matrix A, const Matrix B, Matrix C)
 
 void mat_mul(const Matrix& A, const Matrix& B, Matrix& C);
 
-const size_t M = 480, N = 800, P = 640;
+const size_t M = 480, N = 640, P = 320;
 
 float host_A[M][N], host_B[N][P], host_C[M][P];
 
 int main()
 {
-
     for (int i = 0; i < M; i++)
     {
         for (int j = 0; j < N; j++)
@@ -270,9 +269,9 @@ int main()
 
     mat_mul(A, B, C);
 
-    for (int i = 0; i < M; i++)
+    for (int i = 0; i < M / 10; i++)
     {
-        for (int j = 0; j < P; j++)
+        for (int j = 0; j < P / 10; j++)
         {
             std::cout << host_C[i][j] << " ";
         }
@@ -284,7 +283,7 @@ int main()
     // 0 1 0 0 ...
     // 0 0 1 0 ...
     // ...
-    // until to (479, 479)
+    // until to (32, 32)
     // after: all zero
 
     return 0;
@@ -312,9 +311,9 @@ void mat_mul(const Matrix& A, const Matrix& B, Matrix& C)
     dim3 dim_block = { 16, 16 };
     dim3 dim_grid = { uint32_t(P / dim_block.x), uint32_t(M / dim_block.y) };
 
-    Matrix kernel_call_A = Matrix{ M, N, reinterpret_cast<float*>(ptr_A.ptr), ptr_A.pitch / sizeof(float) };
-    Matrix kernel_call_B = Matrix{ N, P, reinterpret_cast<float*>(ptr_B.ptr), ptr_B.pitch / sizeof(float) };
-    Matrix kernel_call_C = Matrix{ M, P, reinterpret_cast<float*>(ptr_C.ptr), ptr_C.pitch / sizeof(float) };
+    Matrix kernel_call_A = Matrix{ M, N, reinterpret_cast<float*>(ptr_A.ptr), size_t(ptr_A.pitch / sizeof(float)) };
+    Matrix kernel_call_B = Matrix{ N, P, reinterpret_cast<float*>(ptr_B.ptr), size_t(ptr_B.pitch / sizeof(float)) };
+    Matrix kernel_call_C = Matrix{ M, P, reinterpret_cast<float*>(ptr_C.ptr), size_t(ptr_C.pitch / sizeof(float)) };
 
     mat_mul_kernel<<<dim_grid, dim_block >>> (kernel_call_A, kernel_call_B, kernel_call_C);
 
@@ -335,6 +334,15 @@ void mat_mul(const Matrix& A, const Matrix& B, Matrix& C)
     cc(cudaFree(ptr_C.ptr));
 }
 ```
+
+代码中的`cc`是一个自定义的宏，用于检测CUDA API的调用结果是否正确，可以在[附录A](./cuda_appendix_A.md)中找到说明。
+
+上述代码中，每个线程独立计算矩阵$C$中的一个元素，每次计算需要获取$A$的第`row`行，$B$的第`col`的所有元素进行相乘、累加。如下图所示。
+
+> 图 matrix multiplication without shared memory.png
+> 
+> ![matrix-multiplication-without-shared-memory.png](./resources/matrix-multiplication-without-shared-memory.png)
+
 
 除使用`cudaMalloc`在设备中分配内存空间外，还可以通过`__device__`声明设备中的变量，用`__constant__`声明设备中的常量。
 
@@ -361,3 +369,5 @@ cudaMemcpyToSymbol(devPointer, &ptr, sizeof(ptr));
 ## 共享内存
 
 此前提到，线程块中的所有线程可以访问同一块由用户管理的共享内存，这个内存空间有望更贴近处理器，因此可能会具有更快的访问速度。因此，要尽可能地将访问全局内存变为访问共享内存。
+
+观察代码4.3，在计算矩阵乘法时需要获取矩阵A第row行，矩阵B第col的所有元素，每次访问都发生在全局内存之中，这是一种非常低效的存取方式。现在，考虑将矩阵$C$的乘法分块执行.
