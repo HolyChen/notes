@@ -162,6 +162,8 @@ tid = y * blockDim.x * gridDim.x + x;
 
 线程块的执行必须要有独立性，即彼此间没有执行顺序的依赖。它们即应能顺序执行，也能并行执行。这允许线程块可以被以任何顺序、任意核心数量进行调度。
 
+对于一个设备，每个线程块中线程的最大个数是固定的，并且在一个线程块中，每个维度的大小也是有限制，同样，网格的维度也是受限的。这些参数分别对应结构`cudaDeviceProp`中的域`maxThreadsPerBlock`，`maxThreadsDim`和`maxGridSize`。当使用了错误的线程块维度或网格维度进行kernel call时，会得到错误`cudaErrorInvalidConfiguration`。
+
 同属一个线程块内的线程可以通过**共享内存**(*shared Memory*)进行数据共享，也可以通过`__syncthreads()`指令函数进行同步。当块内的线程调用`__syncthreads()`时，它会被阻塞直到块内所有的线程均运行至此。为了线程间能够高效的协作，共享内存有望是靠近处理器核心的低延迟内存，例如L1缓存，`__synthreads__`也有望是轻量级的。共享内存及线程同步的使用将在[Chapter 4](./cuda_04.md)看到。
 
 这里一个给出使用二维线程计算矩阵加法的例子。

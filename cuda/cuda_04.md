@@ -563,4 +563,6 @@ void mat_mul(const Matrix& A, const Matrix& B, Matrix& C)
 }
 ```
 
+在代码4.5中，`BLOCK\_SIZE`通过C++的模板语法作为模板参数传递给kernel。CUDA所支持的C++扩展可以参考[C/C++ Language Support](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#c-cplusplus-language-support)。
+
 对于代码4.3和4.5，我们在一个GTX 970显卡上进行了测试。当设$M=4800$，$N=6400$，$P=3200$，$BLOCK\_SIZE = 16$时，代码4.3和4.5的kernel call运行时间分别为102.90秒和35.46秒，加速比为2.90，运行时间减少了67.44秒。
