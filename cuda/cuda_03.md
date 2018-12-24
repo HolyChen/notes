@@ -1,6 +1,11 @@
 # Chapter 3 - 编程模型
 
-References: [CUDA C Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#device-selection)
+目录
+- [异构编程](#异构编程)
+- [Kernel](#Kernel)
+- [线程层次](线程层次)
+- [内存层次](#内存层次)
+- [参考](#参考)
 
 ## 异构编程
 
@@ -288,3 +293,6 @@ CUDA的每个线程都具有自己私有的局部内存；每个线程块具有�
 
 详细内容可见于[设备内存访问](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#device-memory-accesses)。
 
+## 参考
+
+- [CUDA C Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#device-selection)
