@@ -370,4 +370,193 @@ cudaMemcpyToSymbol(devPointer, &ptr, sizeof(ptr));
 
 此前提到，线程块中的所有线程可以访问同一块由用户管理的共享内存，这个内存空间有望更贴近处理器，因此可能会具有更快的访问速度。因此，要尽可能地将访问全局内存变为访问共享内存。
 
-观察代码4.3，在计算矩阵乘法时需要获取矩阵A第row行，矩阵B第col的所有元素，每次访问都发生在全局内存之中，这是一种非常低效的存取方式。现在，考虑将矩阵$C$的乘法分块执行.
+观察代码4.3，在计算矩阵乘法时需要获取矩阵$A$第`row`行，矩阵$B$第`col`的所有元素，每次访问都发生在全局内存之中，这是一种非常低效的存取方式。现在，考虑将矩阵$C$的乘法分块执行。
+
+如下图所示。将矩阵$C$分割为若干个不重叠的，大小为$BLOCK\_SIZE \times BLOCK\_SIZE$的方形的子矩阵$C_{sub}$。为了计算一个$C_{sub}$中的所有元素，需要获取$A$中对应的`blockDim.y`行，$B$中对应的`blockDim.x`列。同样的，$A$和$B$也做如此分解。此时，矩阵乘法中一个元素的计算，由原来两个完整的向量的内积变为了多对向量的内积之和。
+
+> 图 matrix multiplication with shared memory
+>
+> ![matrix-multiplication-with-shared-memory.png](./resources/matrix-multiplication-with-shared-memory.png)
+
+此时，每次乘法都在$A$的子矩阵和$B$的子矩阵之间进行，这两个子矩阵足够小，可以放入共享内存之中。如何将子矩阵载入共享内存中呢？假设当前的线程块的索引为`blockIdx`，正在进行计算的是$A$中第`blockIdx.y`条，也就是第`blockIdx.y * blockDim.y`到`blockIdx.(y + 1) * blockDim.y - 1`行的第`i`块，和$B$中对应的第`i`块的乘法。在分配好两个大小为`blockDim.x * blockDim.y`的共享内存之后，分别用每个线程去载入两个子矩阵的第`threadIdx`个元素。应该注意到，我们不能假设所有的线程都恰好同时完成载入，因此需要通过函数`__syncthreads`进行同步。在同步完成后，我们可以将子矩阵对应元素矩阵乘法的结果加到一个线程私有的累加器中。需要注意的是，一个线程完成了向量乘法，其他线程可能尚未完成，而它利用的数据会被其他线程继续使用，如果此时就让该线程进行下一次数据加载操作，会导致数据不一致，因此，这里也需要一个`__syncthreads`进行线程同步。在完成所有块的加法后，我们累加器的结果存储到矩阵`C`中。
+
+使用代码4.3中的方法，全局内存的访问是$2MPN+MP$次，新的方法将它降低到$2MPN / BLOCK\_SIZE+MP$次。
+
+代码4.5展示了这种方法。
+
+```cpp
+// ------ code 4.5 ------
+
+#include <cstdint>
+#include <iostream>
+
+#include <cuda_runtime.h>
+#include <device_launch_parameters.h>
+
+#include "cuda_call.h"
+
+struct Matrix 
+{
+    size_t rows;
+    size_t cols;
+    float* elements;
+    size_t stride;
+};
+
+__device__ float get_element(const Matrix A, size_t row, size_t col)
+{
+    return A.elements[row * A.stride + col];
+}
+
+__device__ void set_element(Matrix A, size_t row, size_t col, float value)
+{
+    A.elements[row * A.stride + col] = value;
+}
+
+template <size_t BLOCK_SIZE>
+__device__ Matrix get_sub_matrix(Matrix A, size_t upper, size_t left)
+{
+    return Matrix{ BLOCK_SIZE, BLOCK_SIZE, A.elements + upper * BLOCK_SIZE * A.stride + left * BLOCK_SIZE, A.stride };
+}
+
+template <size_t BLOCK_SIZE>
+__global__ void mat_mul_kernel(const Matrix A, const Matrix B, Matrix C)
+{
+    size_t block_row = blockIdx.y;
+    size_t block_col = blockIdx.x;
+
+    size_t row = threadIdx.y;
+    size_t col = threadIdx.x;
+
+    float result = 0.0f;
+    size_t N = B.rows;
+    size_t N_block = B.rows / BLOCK_SIZE;
+
+    Matrix C_sub = get_sub_matrix<BLOCK_SIZE>(C, block_row, block_col);
+
+    for (size_t i = 0; i < N_block ; i++)
+    {
+        // A's sub matrix
+        __shared__ float As[BLOCK_SIZE][BLOCK_SIZE];
+        // B's sub matrix
+        __shared__ float Bs[BLOCK_SIZE][BLOCK_SIZE];
+
+        Matrix A_sub = get_sub_matrix<BLOCK_SIZE>(A, block_row, i);
+        Matrix B_sub = get_sub_matrix<BLOCK_SIZE>(B, i, block_col);
+
+        As[row][col] = get_element(A_sub, row, col);
+        Bs[row][col] = get_element(B_sub, row, col);
+
+        __syncthreads();
+
+        for (size_t j = 0; j < BLOCK_SIZE; j++)
+        {
+            result += As[row][j] * Bs[j][col];
+        }
+
+        __syncthreads();
+    }
+
+    set_element(C_sub, row, col, result);
+}
+
+void mat_mul(const Matrix& A, const Matrix& B, Matrix& C);
+
+const size_t M = 480, N = 640, P = 320;
+
+float host_A[M][N], host_B[N][P], host_C[M][P];
+
+int main()
+{
+
+    for (int i = 0; i < M; i++)
+    {
+        for (int j = 0; j < N; j++)
+        {
+            host_A[i][j] = i == j ? 1.0 : 0.0;
+        }
+    }
+
+    for (int i = 0; i < N; i++)
+    {
+        for (int j = 0; j < P; j++)
+        {
+            host_B[i][j] = i == j ? 1.0 : 0.0;
+        }
+    }
+
+    Matrix A{ M, N, reinterpret_cast<float*>(host_A) };
+    Matrix B{ N, P, reinterpret_cast<float*>(host_B) };
+    Matrix C{ M, P, reinterpret_cast<float*>(host_C) };
+
+    mat_mul(A, B, C);
+
+    for (int i = 0; i < M / 10; i++)
+    {
+        for (int j = 0; j < P / 10; j++)
+        {
+            std::cout << host_C[i][j] << " ";
+        }
+        std::cout << std::endl;
+    }
+
+    // Output maybe:
+    // 1 0 0 0 ...
+    // 0 1 0 0 ...
+    // 0 0 1 0 ...
+    // ...
+    // until to (32, 32)
+    // after: all zero
+
+    return 0;
+}
+
+void mat_mul(const Matrix& A, const Matrix& B, Matrix& C)
+{
+    size_t M = A.rows, N = B.rows, P = B.cols;
+
+    cudaPitchedPtr ptr_A, ptr_B, ptr_C;
+
+    // allocation by cudaMallocPitch
+    ptr_A.xsize = N * sizeof(float);
+    ptr_A.ysize = M;
+    cc(cudaMallocPitch(&ptr_A.ptr, &ptr_A.pitch, ptr_A.xsize, ptr_A.ysize));
+
+    // allocation by cudaMalloc3D
+    cc(cudaMalloc3D(&ptr_B, make_cudaExtent(P * sizeof(float), N, 1)));
+    cc(cudaMalloc3D(&ptr_C, make_cudaExtent(P * sizeof(float), M, 1)));
+
+    // memcpy by cudaMemcpy2D
+    cc(cudaMemcpy2D(ptr_A.ptr, ptr_A.pitch, A.elements, sizeof(float) * N, sizeof(float) * N, M, cudaMemcpyHostToDevice));
+    cc(cudaMemcpy2D(ptr_B.ptr, ptr_B.pitch, B.elements, sizeof(float) * P, sizeof(float) * P, N, cudaMemcpyHostToDevice));
+
+    const size_t BLOCK_SIZE = 16;
+
+    dim3 dim_block = { 16, 16 };
+    dim3 dim_grid = { uint32_t(P / dim_block.x), uint32_t(M / dim_block.y) };
+
+    Matrix kernel_call_A = Matrix{ M, N, reinterpret_cast<float*>(ptr_A.ptr), size_t(ptr_A.pitch / sizeof(float)) };
+    Matrix kernel_call_B = Matrix{ N, P, reinterpret_cast<float*>(ptr_B.ptr), size_t(ptr_B.pitch / sizeof(float)) };
+    Matrix kernel_call_C = Matrix{ M, P, reinterpret_cast<float*>(ptr_C.ptr), size_t(ptr_C.pitch / sizeof(float)) };
+
+    mat_mul_kernel<BLOCK_SIZE><<<dim_grid, dim_block >>> (kernel_call_A, kernel_call_B, kernel_call_C);
+
+    cc(cudaDeviceSynchronize());
+
+    // memcpy by cudaMemcpy3D
+    cudaMemcpy3DParms cpy_3d_parms_for_C = { 0 };
+    cpy_3d_parms_for_C.dstPtr = cudaPitchedPtr{ C.elements, sizeof(float) * P, sizeof(float) * P, M };
+    cpy_3d_parms_for_C.dstPos = { 0, 0, 0 };
+    cpy_3d_parms_for_C.srcPtr = ptr_C;
+    cpy_3d_parms_for_C.srcPos = { 0, 0, 0 };
+    cpy_3d_parms_for_C.extent = make_cudaExtent(sizeof(float) * P, M, 1);
+    cpy_3d_parms_for_C.kind = cudaMemcpyDeviceToHost;
+    cc(cudaMemcpy3D(&cpy_3d_parms_for_C));
+
+    cc(cudaFree(ptr_A.ptr));
+    cc(cudaFree(ptr_B.ptr));
+    cc(cudaFree(ptr_C.ptr));
+}
+```
+
+对于代码4.3和4.5，我们在一个GTX 970显卡上进行了测试。当设$M=4800$，$N=6400$，$P=3200$，$BLOCK\_SIZE = 16$时，代码4.3和4.5的kernel call运行时间分别为102.90秒和35.46秒，加速比为2.90，运行时间减少了67.44秒。
