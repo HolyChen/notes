@@ -536,7 +536,7 @@ void mat_mul(const Matrix& A, const Matrix& B, Matrix& C)
 
     const size_t BLOCK_SIZE = 16;
 
-    dim3 dim_block = { 16, 16 };
+    dim3 dim_block = { BLOCK_SIZE, BLOCK_SIZE };
     dim3 dim_grid = { uint32_t(P / dim_block.x), uint32_t(M / dim_block.y) };
 
     Matrix kernel_call_A = Matrix{ M, N, reinterpret_cast<float*>(ptr_A.ptr), size_t(ptr_A.pitch / sizeof(float)) };
