@@ -566,3 +566,5 @@ void mat_mul(const Matrix& A, const Matrix& B, Matrix& C)
 在代码4.5中，$BLOCK\_SIZE$通过C++的模板语法作为模板参数传递给kernel。CUDA所支持的C++扩展可以参考[C/C++ Language Support](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#c-cplusplus-language-support)。
 
 对于代码4.3和4.5，我们在一个GTX 970显卡上进行了测试。当设$M=4800$，$N=6400$，$P=3200$，$BLOCK\_SIZE = 16$时，代码4.3和4.5的kernel call运行时间分别为102.90秒和35.46秒，加速比为2.90，运行时间减少了67.44秒。
+
+事实上，当我们注释掉所有的计算操作之后，也就是说，每个kernel仅将数据从全局内存中加载到共享内存，最后将0赋值给矩阵$C$中的元素。这时候，程序是的运行时间约为26.89秒，也就是说线程从共享内存中加载数据并计算乘法的时长仅有8.57秒，$78.3\%$的时间都消耗在从全局内存中加载数据上。
