@@ -1,8 +1,10 @@
 # Chapter 4 - 内存
 
 目录
-- [设备内存](#设备内存)
-- [共享内存](#共享内存)
+- [Chapter 4 - 内存](#chapter-4---内存)
+  - [设备内存](#设备内存)
+  - [共享内存](#共享内存)
+  - [常量内存](#常量内存)
 
 ## 设备内存
 
@@ -74,7 +76,11 @@ int main()
 }
 ```
 
-线性内存也可以通过`cudaMallocPitch`和`cudaMalloc3D`进行分配。建议将这两个函数用于分配2D或3D数组，这样可以保证分配的数组的满足[Device Memory Accesses](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#device-memory-accesses)中的对齐需求，以及让行取值或是2D内存与其他设备内存间的复制(`cudaMemcpy2D`，`cudaMemcpy3D`)获得最好性能。
+对于2D或者3D数组，更推荐通过`cudaMallocPitch`和`cudaMalloc3D`进行分配。这样可以保证分配的数组的满足[Device Memory Accesses](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#device-memory-accesses)中的对齐需求，以及让行取值或是2D内存与其他设备内存间的复制(`cudaMemcpy2D`，`cudaMemcpy3D`)获得最好性能。
+
+这有两个原因。第一，对于计算能力3.0及以上的设备，每次访存都会访问128个连续的字节，这可以将线程块中不同线程的连续的内存访问合并至一次，因此当内存访问连续时，访存效率较高。同时，每次对全局内存的访问都会存放在L2缓存中，缓存也是每128个字节为一个单位，如果能够减少全局内存的访问次数，也往往可以减少L2缓存的空间消耗。第二，对于2D或3D数组，常见的操作是按行访问，由于设备以128字节为单位访存，因此一行的数据如果没有经过对齐，可能会处于多个访存单位之中，这可能会增加内存访问的开销。
+
+例如，有一个`float`型矩阵`A[101][101]`。如果没有对齐，每一行有101 x 4 = 128 x 3 + 20 = 404个字节。对于第`A[6][:]`这一行元素,它们被放置在到了5个访存单元中，即`{8, 128, 128, 128, 8}`这样的排布。如果访问这一行的所有元素，则需要5次访存。然而，404个字节，每次访问128个字节，至多只需要4次访存，因此没有对齐的内存结构导致了一次额外的访存开销。当以128字节为单位对齐时，每行具有128 x 4 = 512个字节，也就是每一行都对齐到了一个128字节的起始地址处，无论访存哪一行的元素，都只需要4次内存访问。
 
 `cudaMallocPitch`和`cudaMalloc3D`的接口如下接口：
 
@@ -348,15 +354,10 @@ void mat_mul(const Matrix& A, const Matrix& B, Matrix& C)
 > ![matrix-multiplication-without-shared-memory.png](./resources/matrix-multiplication-without-shared-memory.png)
 
 
-除使用`cudaMalloc`在设备中分配内存空间外，还可以通过`__device__`声明设备中的变量，用`__constant__`声明设备中的常量。
+除使用`cudaMalloc`在设备中分配内存空间外，还可以通过`__device__`声明设备中全局空间的变量。
 
 ```c++
 // ------ code 4.4 ------
-
-__constant__ float constData[256];
-float data[256];
-cudaMemcpyToSymbol(constData, data, sizeof(data));
-cudaMemcpyFromSymbol(data, constData, sizeof(data));
 
 __device__ float devData;
 float value = 3.14f;
@@ -368,7 +369,7 @@ cudaMalloc(&ptr, 256 * sizeof(float));
 cudaMemcpyToSymbol(devPointer, &ptr, sizeof(ptr));
 ```
 
-在上述代码中，出现了两个新的复制数据的方法。`cudaMemcpyToSymbol`和`cudaMemcpyFromSymbol`，它们与`cudaMemcpy`的区别在于其首个参数为设备全局或常量内存空间中的**符号**(*symbol*)，而非地址。此外，这两个函数还可以接受偏移量作为参数。
+在上述代码中，出现了两个新的复制数据的方法。`cudaMemcpyToSymbol`和`cudaMemcpyFromSymbol`，它们与`cudaMemcpy`的区别在于其首个参数为设备全局内存空间中的**符号**(*symbol*)，而非地址。此外，这两个函数还可以接受偏移量作为参数。
 
 ## 共享内存
 
@@ -568,3 +569,5 @@ void mat_mul(const Matrix& A, const Matrix& B, Matrix& C)
 对于代码4.3和4.5，我们在一个GTX 970显卡上进行了测试。当设$M=4800$，$N=6400$，$P=3200$，$BLOCK\_SIZE = 16$时，代码4.3和4.5的kernel call运行时间分别为102.90秒和35.46秒，加速比为2.90，运行时间减少了67.44秒。
 
 事实上，当我们注释掉所有的计算操作之后，也就是说，每个kernel仅将数据从全局内存中加载到共享内存，最后将0赋值给矩阵$C$中的元素。这时候，程序是的运行时间约为26.89秒，也就是说线程从共享内存中加载数据并计算乘法的时长仅有8.57秒，$78.3\%$的时间都消耗在从全局内存中加载数据上。
+
+## 常量内存
