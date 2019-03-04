@@ -1,18 +1,28 @@
 # Chapter 4 - 内存
 
 目录
-- [Chapter 4 - 内存](#chapter-4---内存)
-  - [设备内存](#设备内存)
-  - [共享内存](#共享内存)
-  - [常量内存](#常量内存)
+
+- [内存层次](#内存层次)
+- [设备内存](#设备内存)
+- [共享内存](#共享内存)
+- [常量内存](#常量内存)
+
+## 内存层次
+
+CUDA的每个线程都具有自己私有的局部内存；每个线程块具有共享内存，它为块内所有线程可见。所有线程都可以访问全局内存。除此之外，还有全局的只读内存空间，即常量内存空间和纹理内存空间。如图所示。
+
+> 图 memory hierarchy
+>
+> ![memory-hierarchy.png](./resources/memory-hierarchy.png)
+
+
+详细内容可见于[设备内存访问](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#device-memory-accesses)。
 
 ## 设备内存
 
 CUDA运行时为主机和设备的内存管理提供了一组接口，包括内存分配、释放、数据传输等。设备内存既可以被分配为**线性内存**(*linear memory*)，也可以被分配为**CUDA 数组**(*CUDA arrays*)。其中CUDA数组`cudaArray`是不透明内存布局，我们只能够通过`cudaArray_t`持有其指针。CUDA数组对纹理获取(texture fetching)有着特殊的优化。
 
-线性内存位于设备中的40位地址空间中，可以通过指针进行访问，因此可以实现二叉树等链式结构
-
-对于线性内存，常用的API如下：
+线性内存位于设备中的40位地址空间中，可以通过指针进行访问，因此可以用于实现链式结构。用管理线性内存的API已经在[Chapter 3](./cuda_03.md)的向量加法和矩阵加法程序多次出现。这里给出具体接口：
 
 ```cpp
 // 用于分配设备中的线性内存。
@@ -38,42 +48,6 @@ __host__ ​ __device__ ​cudaError_t cudaFree ( void* devPtr );
 //     cudaMemcpyDeviceToDevice = 3
 //     cudaMemcpyDefault = 4 通过指针类型自动推理，需要Unified虚拟地址
 __host__ ​cudaError_t cudaMemcpy ( void* dst, const void* src, size_t count, cudaMemcpyKind kind );
-```
-
-在此前计算向量加法的程序中，这些函数被多次用到。
-
-```cpp
-// ------ code 4.1 ------
-
-// kernel defination...
-
-int main()
-{
-    // ...
-
-    // allocate for arrays on device
-    cudaMalloc(&A, sizeof(float) * N);
-    cudaMalloc(&B, sizeof(float) * N);
-    cudaMalloc(&C, sizeof(float) * N);
-
-    // copy memory from host to device
-    cudaMemcpy(A, host_A, sizeof(float) * N, cudaMemcpyHostToDevice);
-    cudaMemcpy(B, host_B, sizeof(float) * N, cudaMemcpyHostToDevice);
-
-    // ...
-
-    // copy result from device to host
-    cudaMemcpy(host_C, C, sizeof(float) * N, cudaMemcpyDeviceToHost);
-
-    // deallocate
-    cudaFree(A);
-    cudaFree(B);
-    cudaFree(C);
-
-    // ...
-
-    return 0;
-}
 ```
 
 对于2D或者3D数组，更推荐通过`cudaMallocPitch`和`cudaMalloc3D`进行分配。这样可以保证分配的数组的满足[Device Memory Accesses](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#device-memory-accesses)中的对齐需求，以及让行取值或是2D内存与其他设备内存间的复制(`cudaMemcpy2D`，`cudaMemcpy3D`)获得最好性能。
@@ -126,8 +100,6 @@ __host__ ​cudaExtent make_cudaExtent ( size_t w, size_t h, size_t d );
 下面的程序通过`cudaMallocPitch`和 `cudaMalloc3D`分别分配了2D和3D线性数组，可以看到，因为内存补齐的缘故，每一行在内存中实际的宽度与用户指定的并不相同，均被补齐到512字节的整数倍。补齐的具体规则见[Device Memory Accesses](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#device-memory-accesses)。
 
 ```cpp
-// ------ code 4.2 ------
-
 #include <cstdint>
 #include <iostream>
 
@@ -138,29 +110,29 @@ int main()
 {
     cudaPitchedPtr ptr;
 
-    cudaMallocPitch(&ptr.ptr, &ptr.pitch, 15 * sizeof(float), 15);
+    cc(cudaMallocPitch(&ptr.ptr, &ptr.pitch, 15 * sizeof(float), 15)));
     std::cout << ptr.pitch << std::endl;
-    cudaFree(ptr.ptr);
+    cc(cudaFree(ptr.ptr));
 
-    cudaMallocPitch(&ptr.ptr, &ptr.pitch, 128 * sizeof(float), 15);
+    cc(cudaMallocPitch(&ptr.ptr, &ptr.pitch, 128 * sizeof(float), 15));
     std::cout << ptr.pitch << std::endl;
-    cudaFree(ptr.ptr);
+    cc(cudaFree(ptr.ptr));
 
-    cudaMallocPitch(&ptr.ptr, &ptr.pitch, 255 * sizeof(float), 15);
+    cc(cudaMallocPitch(&ptr.ptr, &ptr.pitch, 255 * sizeof(float), 15));
     std::cout << ptr.pitch << std::endl;
-    cudaFree(ptr.ptr);
+    cc(cudaFree(ptr.ptr));
 
-    cudaMalloc3D(&ptr, make_cudaExtent(15 * sizeof(float), 15, 3));
+    cc(cudaMalloc3D(&ptr, make_cudaExtent(15 * sizeof(float), 15, 3)));
     std::cout << ptr.pitch << " " << ptr.xsize << " " << ptr.ysize << std::endl;
-    cudaFree(ptr.ptr);
+    cc(cudaFree(ptr.ptr));
 
-    cudaMalloc3D(&ptr, make_cudaExtent(128 * sizeof(float), 15, 3));
+    cc(cudaMalloc3D(&ptr, make_cudaExtent(128 * sizeof(float), 15, 3)));
     std::cout << ptr.pitch << " " << ptr.xsize << " " << ptr.ysize << std::endl;
-    cudaFree(ptr.ptr);
+    cc(cudaFree(ptr.ptr));
 
-    cudaMalloc3D(&ptr, make_cudaExtent(255 * sizeof(float), 15, 3));
+    cc(cudaMalloc3D(&ptr, make_cudaExtent(255 * sizeof(float), 15, 3)));
     std::cout << ptr.pitch << " " << ptr.xsize << " " << ptr.ysize << std::endl;
-    cudaFree(ptr.ptr);
+    cc(cudaFree(ptr.ptr));
 
     // Output maybe:
     //512
@@ -186,7 +158,8 @@ int main()
 //   witdh: 待传输矩阵宽度（字节）
 //   height: 待传输矩阵高度
 //   kind: 传输类型，与cudaMemcpy类似
-__host__ ​cudaError_t cudaMemcpy2D ( void* dst, size_t dpitch, const void* src, size_t spitch, size_t width, size_t height, cudaMemcpyKind kind );
+__host__ ​cudaError_t cudaMemcpy2D ( void* dst, size_t dpitch, const void* src, 
+            size_t spitch, size_t width, size_t height, cudaMemcpyKind kind );
 
 // 在3D对象间复制带有对齐的数据
 // Args:
@@ -194,7 +167,7 @@ __host__ ​cudaError_t cudaMemcpy2D ( void* dst, size_t dpitch, const void* src
 __host__ ​cudaError_t cudaMemcpy3D ( const cudaMemcpy3DParms* p );
 ```
 
-在使用`cudaMemcpy3D`时，首先要将参数用`0`进行初始化，即，例如
+在使用`cudaMemcpy3D`时，首先要将参数用`0`进行初始化，即
 
 ```cpp
 cudaMemcpy3DParms myParms = {0};
@@ -205,17 +178,15 @@ cudaMemcpy3DParms myParms = {0};
 下面给出一个使用上述函数的示例程序，改程序计算两个矩阵$A$和$B$的乘积$C=AB$。
 
 ```cpp
-// ------ code 4.3 ------
-
 #include <cstdint>
 #include <iostream>
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 
-#include "cuda_call.h"
+#include "cuda_helper.h"
 
-struct Matrix 
+struct Matrix
 {
     size_t rows;
     size_t cols;
@@ -299,53 +270,51 @@ int main()
     return 0;
 }
 
-void mat_mul(const Matrix& A, const Matrix& B, Matrix& C)
+void mat_mul(const Matrix& h_A, const Matrix& h_B, Matrix& h_C)
 {
-    size_t M = A.rows, N = B.rows, P = B.cols;
+    size_t M = h_A.rows, N = h_B.rows, P = h_B.cols;
 
-    cudaPitchedPtr ptr_A, ptr_B, ptr_C;
+    cudaPitchedPtr d_A, d_B, d_C;
 
     // allocation by cudaMallocPitch
-    ptr_A.xsize = N * sizeof(float);
-    ptr_A.ysize = M;
-    cc(cudaMallocPitch(&ptr_A.ptr, &ptr_A.pitch, ptr_A.xsize, ptr_A.ysize));
+    d_A.xsize = N * sizeof(float);
+    d_A.ysize = M;
+    cc(cudaMallocPitch(&d_A.ptr, &d_A.pitch, d_A.xsize, d_A.ysize));
 
     // allocation by cudaMalloc3D
-    cc(cudaMalloc3D(&ptr_B, make_cudaExtent(P * sizeof(float), N, 1)));
-    cc(cudaMalloc3D(&ptr_C, make_cudaExtent(P * sizeof(float), M, 1)));
+    cc(cudaMalloc3D(&d_B, make_cudaExtent(P * sizeof(float), N, 1)));
+    cc(cudaMalloc3D(&d_C, make_cudaExtent(P * sizeof(float), M, 1)));
 
     // memcpy by cudaMemcpy2D
-    cc(cudaMemcpy2D(ptr_A.ptr, ptr_A.pitch, A.elements, sizeof(float) * N, sizeof(float) * N, M, cudaMemcpyHostToDevice));
-    cc(cudaMemcpy2D(ptr_B.ptr, ptr_B.pitch, B.elements, sizeof(float) * P, sizeof(float) * P, N, cudaMemcpyHostToDevice));
+    cc(cudaMemcpy2D(d_A.ptr, d_A.pitch, h_A.elements, sizeof(float) * N, sizeof(float) * N, M, cudaMemcpyHostToDevice));
+    cc(cudaMemcpy2D(d_B.ptr, d_B.pitch, h_B.elements, sizeof(float) * P, sizeof(float) * P, N, cudaMemcpyHostToDevice));
 
     dim3 dim_block = { 16, 16 };
     dim3 dim_grid = { uint32_t(P / dim_block.x), uint32_t(M / dim_block.y) };
 
-    Matrix kernel_call_A = Matrix{ M, N, reinterpret_cast<float*>(ptr_A.ptr), size_t(ptr_A.pitch / sizeof(float)) };
-    Matrix kernel_call_B = Matrix{ N, P, reinterpret_cast<float*>(ptr_B.ptr), size_t(ptr_B.pitch / sizeof(float)) };
-    Matrix kernel_call_C = Matrix{ M, P, reinterpret_cast<float*>(ptr_C.ptr), size_t(ptr_C.pitch / sizeof(float)) };
+    Matrix d_matrix_A = Matrix{ M, N, reinterpret_cast<float*>(d_A.ptr), size_t(d_A.pitch / sizeof(float)) };
+    Matrix d_matrix_B = Matrix{ N, P, reinterpret_cast<float*>(d_B.ptr), size_t(d_B.pitch / sizeof(float)) };
+    Matrix d_matrix_C = Matrix{ M, P, reinterpret_cast<float*>(d_C.ptr), size_t(d_C.pitch / sizeof(float)) };
 
-    mat_mul_kernel<<<dim_grid, dim_block >>> (kernel_call_A, kernel_call_B, kernel_call_C);
+    mat_mul_kernel<<<dim_grid, dim_block>>> (d_matrix_A, d_matrix_B, d_matrix_C);
 
     cc(cudaDeviceSynchronize());
 
     // memcpy by cudaMemcpy3D
     cudaMemcpy3DParms cpy_3d_parms_for_C = { 0 };
-    cpy_3d_parms_for_C.dstPtr = cudaPitchedPtr{ C.elements, sizeof(float) * P, sizeof(float) * P, M };
+    cpy_3d_parms_for_C.dstPtr = cudaPitchedPtr{ h_C.elements, sizeof(float) * P, sizeof(float) * P, M };
     cpy_3d_parms_for_C.dstPos = { 0, 0, 0 };
-    cpy_3d_parms_for_C.srcPtr = ptr_C;
+    cpy_3d_parms_for_C.srcPtr = d_C;
     cpy_3d_parms_for_C.srcPos = { 0, 0, 0 };
     cpy_3d_parms_for_C.extent = make_cudaExtent(sizeof(float) * P, M, 1);
     cpy_3d_parms_for_C.kind = cudaMemcpyDeviceToHost;
     cc(cudaMemcpy3D(&cpy_3d_parms_for_C));
 
-    cc(cudaFree(ptr_A.ptr));
-    cc(cudaFree(ptr_B.ptr));
-    cc(cudaFree(ptr_C.ptr));
+    cc(cudaFree(d_A.ptr));
+    cc(cudaFree(d_B.ptr));
+    cc(cudaFree(d_C.ptr));
 }
 ```
-
-代码中的`cc`是一个自定义的宏，用于检测CUDA API的调用结果是否正确，可以在[附录A](./cuda_appendix_A.md)中找到说明。
 
 上述代码中，每个线程独立计算矩阵$C$中的一个元素，每次计算需要获取$A$的第`row`行，$B$的第`col`的所有元素进行相乘、累加。如下图所示。
 
@@ -354,11 +323,9 @@ void mat_mul(const Matrix& A, const Matrix& B, Matrix& C)
 > ![matrix-multiplication-without-shared-memory.png](./resources/matrix-multiplication-without-shared-memory.png)
 
 
-除使用`cudaMalloc`在设备中分配内存空间外，还可以通过`__device__`声明设备中全局空间的变量。
+除使用`cudaMalloc`在设备中分配内存空间外，还可以通过`__device__`声明设备中全局空间的变量，这样声明的变量的生命期与整个应用程序的生命期相同。
 
-```c++
-// ------ code 4.4 ------
-
+```cpp
 __device__ float devData;
 float value = 3.14f;
 cudaMemcpyToSymbol(devData, &value, sizeof(float));
@@ -373,9 +340,9 @@ cudaMemcpyToSymbol(devPointer, &ptr, sizeof(ptr));
 
 ## 共享内存
 
-此前提到，线程块中的所有线程可以访问同一块由用户管理的共享内存，这个内存空间有望更贴近处理器，因此可能会具有更快的访问速度。因此，要尽可能地将访问全局内存变为访问共享内存。
+此前提到，线程块中的所有线程可以访问同一块由用户管理的**共享内存**(*shared memory*)，它比全局变量更贴近处理器，因此“可能”会具有更快的访问速度。因此，为了提升程序的运行速度，常常要尽可能地将访问全局内存变为访问共享内存。
 
-观察代码4.3，在计算矩阵乘法时需要获取矩阵$A$第`row`行，矩阵$B$第`col`的所有元素，每次访问都发生在全局内存之中，这是一种非常低效的存取方式。现在，考虑将矩阵$C$的乘法分块执行。
+观察此前矩阵乘法的代码，在计算$C_{row, col}$时，线程需要获取矩阵$A$第`row`行，矩阵$B$第`col`的所有元素，而这些元素都存在于全局内存之中。这是一种非常低效的存取方式。现在，考虑将矩阵$C$的乘法分块执行，使得每一块都可以通过共享内存进行优化。
 
 如下图所示。将矩阵$C$分割为若干个不重叠的，大小为$BLOCK\_SIZE \times BLOCK\_SIZE$的方形的子矩阵$C_{sub}$。为了计算一个$C_{sub}$中的所有元素，需要获取$A$中对应的`blockDim.y`行，$B$中对应的`blockDim.x`列。同样的，$A$和$B$也做如此分解。此时，矩阵乘法中一个元素的计算，由原来两个完整的向量的内积变为了多对向量的内积之和。
 
