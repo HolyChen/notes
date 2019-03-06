@@ -13,7 +13,7 @@ Author: HolyChen
 
 [附录A 调试](./cuda_appendix_A.md)
 
-[代码样例](./code/samples/code_list.md)
+[代码样例](./code/samples/readme.md)
 
 ## 版权声明
 
