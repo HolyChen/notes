@@ -39,7 +39,7 @@ void kernel_histogram_naive_block(const char* input, int* result, const size_t l
 __global__
 void kernel_histogram_naive_interleaved(const char* input, int* result, const size_t len, const size_t n_bin)
 {
-    int section = blockDim.x * gridDim.x;
+    const int section = blockDim.x * gridDim.x;
 
     for (int i = threadIdx.x + blockDim.x * blockIdx.x; i < len; i += section)
     {
@@ -64,7 +64,7 @@ void kernel_histogram_privatized(const char* input, int* result, const size_t le
 
     __syncthreads();
 
-    int section = blockDim.x * gridDim.x;
+    const int section = blockDim.x * gridDim.x;
 
     for (int i = threadIdx.x + blockDim.x * blockIdx.x; i < len; i += section)
     {
@@ -85,6 +85,60 @@ void kernel_histogram_privatized(const char* input, int* result, const size_t le
     }
 }
 
+// 使用共享内存处理并将对相同bin的数据进行聚合处理
+__global__
+void kernel_histogram_aggregated(const char* input, int* result, const size_t len, const size_t n_bin)
+{
+    extern __shared__ int local_hist[];
+
+    for (int bid = threadIdx.x; bid < n_bin; bid += blockDim.x)
+    {
+        local_hist[bid] = 0;
+    }
+
+    __syncthreads();
+
+    const int section = blockDim.x * gridDim.x;
+    int pre = -1;
+    int cur = 0;
+    int accumulator = 0;
+
+    for (int i = threadIdx.x + blockIdx.x * blockDim.x; i < len; i += section)
+    {
+        int c = input[i];
+        if (c >= 0 && c < n_bin)
+        {
+            cur = c;
+
+            if (cur != pre)
+            {
+                if (pre != -1)
+                {
+                    atomicAdd(&local_hist[pre], accumulator);
+                }
+
+                accumulator = 1;
+                pre = cur;
+            }
+            else
+            {
+                accumulator++;
+            }
+        }
+    }
+
+    if (pre != -1)
+    {
+        atomicAdd(&local_hist[pre], accumulator);
+    }
+
+    __syncthreads();
+
+    for (int bid = threadIdx.x; bid < n_bin; bid += blockDim.x)
+    {
+        atomicAdd(&result[bid], local_hist[bid]);
+    }
+}
 
 std::unique_ptr<int[]> gpu_histogram(const std::unique_ptr<char[]>& input, const size_t len, const size_t n_bin, 
     void(*kernel)(const char*, int *, size_t, size_t))
@@ -100,7 +154,7 @@ std::unique_ptr<int[]> gpu_histogram(const std::unique_ptr<char[]>& input, const
     cc(cudaMalloc(&d_result, sizeof(int) * n_bin));
     cc(cudaMemset(d_result, 0, sizeof(int) * n_bin));
     
-    if (kernel != kernel_histogram_privatized)
+    if (kernel != kernel_histogram_privatized && kernel != kernel_histogram_aggregated)
     {
         kernel<<<(len - 1) / (128 * BLOCK_SIZE) + 1, BLOCK_SIZE>>>(d_input, d_result, len, n_bin);
     }
@@ -223,6 +277,14 @@ void test(const size_t len, const size_t n_bin, DataDistribution type = DataDist
         tgpu.output("GPU Privatized: ");
         valid(h_result, d_result, n_bin);
     }
+
+    {
+        TimeCounter<> tgpu;
+        auto d_result = gpu_histogram(input, len, n_bin, kernel_histogram_aggregated);
+        tgpu.output("GPU Aggregated: ");
+        valid(h_result, d_result, n_bin);
+    }
+
     printf("\n\n");
 }
 
